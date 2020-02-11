@@ -122,7 +122,7 @@ impl AsyncRead for SignalFd {
 }
 
 impl Stream for SignalFd {
-    type Item = u32;
+    type Item = i32;
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
@@ -136,9 +136,32 @@ impl Stream for SignalFd {
                 assert_eq!(count, std::mem::size_of::<signalfd_siginfo>());
                 let mut signum = [0; 4];
                 signum.copy_from_slice(&buf[0..4]);
-                let signum = u32::from_ne_bytes(signum);
+                let signum = i32::from_ne_bytes(signum);
                 Ok(Async::Ready(Some(signum)))
             }
         }
+    }
+}
+
+mod tests {
+    #[test]
+    fn it_works() {
+        use super::*;
+        use tokio::prelude::*;
+
+        let signals = SignalFd::new(&[SIGINT, SIGTERM]).unwrap();
+        let fut = future::lazy(move || {
+            unsafe {
+                libc::raise(SIGINT);
+            }
+            signals
+                .map_err(|err| panic!(err))
+                .for_each(|signal| {
+                    assert_eq!(signal, SIGINT);
+                    Err("ok")
+                })
+                .map_err(|err| assert_eq!(err, "ok"))
+        });
+        tokio::run(fut);
     }
 }
